@@ -1,105 +1,41 @@
+import gspread
 import pandas as pd
 import streamlit as st
 
-# 페이지 기본 설정
-st.set_page_config(
-    page_title="팀 예산 관리 대시보드",
-    page_icon="💰",
-    layout="wide",
-)
+# 스트림릿 페이지 설정
+st.title("구글 스프레드시트 연동 Streamlit 앱")
 
-# 사이드바 설정 (필터 및 입력)
-st.sidebar.title("🛠️ 예산 관리 메뉴")
-selected_team = st.sidebar.selectbox(
-    "팀 선택", ["전체", "개발팀", "마케팅팀", "디자인팀", "기획팀"]
-)
-selected_period = st.sidebar.selectbox(
-    "기간 선택", ["2026년 상반기", "2026년 1분기", "2026년 2분기"]
-)
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("➕ 새로운 지출 내역 추가")
-with st.sidebar.form("expense_form"):
-    exp_date = st.date_input("날짜")
-    exp_category = st.selectbox(
-        "카테고리", ["서버/인프라", "소프트웨어", "회식/복리후생", "마케팅", "기타"]
-    )
-    exp_amount = st.number_input("금액 (원)", min_value=0, step=10000)
-    exp_memo = st.text_input("적요 (사용 내역)")
-    submit_button = st.form_submit_button(label="지출 등록")
+# 캐시를 사용하여 데이터를 불러옴 (성능 최적화)
+@st.cache_data(ttl=600)  # 10분마다 캐시 갱신
+def load_data():
+  # 1. 서비스 계정 인증 정보 로드 (Streamlit secrets 또는 로컬 파일 사용)
+  # 로컬 테스트 시: 'credentials.json' 파일 경로 사용
+  gc = gspread.service_account(filename="credentials.json")
 
-    if submit_button:
-        st.sidebar.success(
-            f"등록 완료: {exp_amount:,}원 ({exp_category})"
-        )  # 실제 DB나 파일 연동 시 추가 로직 구현
+  # 2. 스프레드시트 문서 및 시트 선택
+  spreadsheet_url = (
+      "여기에_구글_스프레드시트_URL을_입력하세요"  # 또는 스프레드시트 이름
+  )
+  sh = gc.open_by_url(spreadsheet_url)
+  worksheet = sh.get_worksheet(0)  # 첫 번째 시트 선택
 
-# 메인 대시보드 화면
-st.title("📊 팀 예산 관리 대시보드")
-st.markdown(
-    f"현재 **{selected_team}**의 **{selected_period}** 예산 집행 현황입니다."
-)
+  # 3. 데이터를 DataFrame으로 변환
+  data = worksheet.get_all_records()
+  df = pd.DataFrame(data)
+  return df
 
-# 1. 주요 지표 (Metrics) 요약
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric(
-        label="총 예산 (Budget)", value="50,000,000원", delta="전년 대비 +5%"
-    )
-with col2:
-    st.metric(
-        label="총 지출 (Spent)",
-        value="32,450,000원",
-        delta="64.9%",
-        delta_color="inverse",
-    )
-with col3:
-    st.metric(label="잔여 예산 (Remaining)", value="17,550,000원")
-with col4:
-    st.metric(
-        label="이번 달 지출", value="4,200,000원", delta="-12%", delta_color="normal"
-    )
 
-st.markdown("---")
+try:
+  df = load_data()
 
-# 2. 예산 사용 현황 시각화 및 상세 내역
-col_left, col_right = st.columns([2, 1])
+  # 데이터 출력
+  st.subheader("스프레드시트 원본 데이터")
+  st.dataframe(df)
 
-with col_left:
-    st.subheader("📋 최근 지출 내역")
-    # 샘플 데이터 생성
-    data = {
-        "날짜": ["2026-06-10", "2026-06-12", "2026-06-15", "2026-06-20"],
-        "팀": ["개발팀", "마케팅팀", "개발팀", "디자인팀"],
-        "카테고리": [
-            "서버/인프라",
-            "마케팅",
-            "소프트웨어",
-            "회식/복리후생",
-        ],
-        "적요": [
-            "AWS 클라우드 비용",
-            "인스타그램 광고 집행",
-            "Jira 라이선스 갱신",
-            "팀 워크샵",
-        ],
-        "금액": [1500000, 3000000, 450000, 650000],
-    }
-    df = pd.DataFrame(data)
-    st.dataframe(df, use_container_width=True)
+  # 간단한 데이터 분석 또는 시각화 예시
+  st.subheader("데이터 통계 요약")
+  st.write(df.describe())
 
-with col_right:
-    st.subheader("💡 카테고리별 비중")
-    # 샘플 파이 차트 데이터
-    category_data = pd.DataFrame(
-        {
-            "카테고리": [
-                "서버/인프라",
-                "마케팅",
-                "소프트웨어",
-                "회식/복리후생",
-                "기타",
-            ],
-            "금액": [15000000, 10000000, 5000000, 2000000, 450000],
-        }
-    )
-    st.bar_chart(category_data.set_index("카테고리"))
+except Exception as e:
+  st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
