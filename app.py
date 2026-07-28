@@ -1,52 +1,82 @@
 import pandas as pd
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 
-# 페이지 기본 설정
+# 페이지 설정
 st.set_page_config(
     page_title="팀 예산 관리 대시보드", page_icon="💰", layout="wide"
 )
 
-# 1. 구글 스프레드시트 연결 설정
-# (비밀리에 설정할 시트 주소는 잠시 뒤 시크릿 파일에 등록합니다)
-conn = st.connection("gsheets", type=GSheetsConnection)
+# 타이틀
+st.title("💰 팀 예산 관리 대시보드")
+st.markdown("팀의 예산 사용 현황을 실시간으로 확인하고 관리하세요.")
 
-# 시트 데이터 불러오기 (ttl=0은 캐시를 남기지 않고 실시간으로 불러온다는 뜻)
-df = conn.read(worksheet="지출내역", usecols=list(range(5)), ttl=0)
-
-# 사이드바 설정
-st.sidebar.title("🛠️ 예산 관리 메뉴")
-selected_team = st.sidebar.selectbox(
-    "팀 선택", ["전체"] + list(df["팀"].unique())
+# 예시 데이터 생성 (실제 데이터프레임이나 CSV 파일로 대체 가능)
+if "budget_data" not in st.session_state:
+    st.session_state.budget_data = pd.DataFrame(
+    {
+        "항목": ["회식비", "도서구입", "소프트웨어 구독", "간식비", "출장비"],
+        "카테고리": [
+            "복리후생",
+            "자기계발",
+            "도구/인프라",
+            "복리후생",
+            "업무출장",
+        ],
+        "배정예산": [1000000, 500000, 2000000, 300000, 1500000],
+        "사용금액": [750000, 200000, 2000000, 250000, 800000],
+    }
 )
-selected_period = st.sidebar.selectbox(
-    "기간 선택", ["2026년 상반기", "2026년 1분기", "2026년 2분기"]
-)
 
-# 메인 대시보드 화면
-st.title("📊 팀 예산 관리 대시보드 (Google Sheets 연동)")
+df = st.session_state.budget_data
+df["잔액"] = df["배정예산"] - df["사용금액"]
+df["사용률(%)"] = (df["사용금액"] / df["배정예산"] * 100).round(1)
 
-# 팀 필터링 적용
-if selected_team != "전체":
-    filtered_df = df[df["팀"] == selected_team]
-else:
-    filtered_df = df
+# 상단 주요 지표 (Metrics)
+total_budget = df["배정예산"].sum()
+total_used = df["사용금액"].sum()
+total_remain = df["잔액"].sum()
 
-# 주요 지표 (Metrics) 요약 (스프레드시트 데이터를 기반으로 계산)
-total_spent = filtered_df["금액"].sum()
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric(label="총 예산 (Budget)", value="50,000,000원")
-with col2:
-    st.metric(label="총 지출 (Spent)", value=f"{total_spent:,}원")
-with col3:
-    st.metric(label="잔여 예산 (Remaining)", value=f"{50000000 - total_spent:,}원")
-with col4:
-    st.metric(label="데이터 건수", value=f"{len(filtered_df)}건")
+col1, col2, col3 = st.columns(3)
+col1.metric("총 배정 예산", f"{total_budget:,.0f} 원")
+col2.metric("총 사용 금액", f"{total_used:,.0f} 원")
+col3.metric("남은 예산", f"{total_remain:,.0f} 원")
 
 st.markdown("---")
 
-# 상세 지출 내역 표 출력
-st.subheader("📋 지출 내역 목록")
-st.dataframe(filtered_df, use_container_width=True)
+# 예산 항목별 현황 테이블
+st.subheader("📊 항목별 예산 상세 현황")
+st.dataframe(df, use_container_width=True)
+
+# 지출 내역 추가 섹션
+st.markdown("---")
+st.subheader("➕ 새로운 지출 내역 추가")
+
+with st.form("expense_form"):
+    col_a, col_b = st.columns(2)
+    with col_a:
+        item_name = st.text_input("항목 이름")
+        item_category = st.selectbox(
+            "카테고리", ["복리후생", "자기계발", "도구/인프라", "업무출장", "기타"]
+        )
+    with col_b:
+        allocated = st.number_input("배정 예산 (원)", min_value=0, step=10000)
+        used = st.number_input("사용 금액 (원)", min_value=0, step=10000)
+
+    submitted = st.form_submit_button("추가하기")
+    if submitted:
+        if item_name:
+            new_row = pd.DataFrame(
+                {
+                    "항목": [item_name],
+                    "카테고리": [item_category],
+                    "배정예산": [allocated],
+                    "사용금액": [used],
+                }
+            )
+            st.session_name = pd.concat(
+                [st.session_state.budget_data, new_row], ignore_index=True
+            )
+            st.success(f"'{item_name}' 항목이 추가되었습니다!")
+            st.rerun()
+        else:
+            st.warning("항목 이름을 입력해주세요.")
