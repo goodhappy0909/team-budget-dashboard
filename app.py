@@ -3,6 +3,7 @@ import urllib.parse
 import urllib.request
 import pandas as pd
 import streamlit as st
+from openai import OpenAI
 
 # 페이지 기본 설정
 st.set_page_config(
@@ -69,75 +70,69 @@ def delete_data_from_sheet(row_id):
     return res.get("status") == "success"
 
 
-def generate_budget_report(df):
-    """현재 예산 데이터를 분석하여 브리핑 보고서 생성"""
+def generate_ai_budget_report(df):
+    """OpenAI API를 연동하여 자연어 예산 분석 보고서 생성"""
     if df.empty:
-        return "등록된 데이터가 없어 예산을 집계할 수 없습니다."
+        return "등록된 데이터가 없어 예산을 분석할 수 없습니다."
 
-    # 숫자 데이터 정제
+    # Secrets에서 API 키 가져오기
+    api_key = st.secrets.get("OPENAI_API_KEY")
+    if not api_key:
+        return "⚠️ OpenAI API 키가 설정되지 않았습니다. Streamlit Secrets에 `OPENAI_API_KEY`를 등록해 주세요."
+
+    # 데이터 정제 및 기본 요약
     df["금액"] = pd.to_numeric(df["금액"], errors="coerce").fillna(0)
-
     total_sum = df["금액"].sum()
     total_count = len(df)
-    avg_amount = total_sum / total_count if total_count > 0 else 0
 
-    # 항목별 집계
-    cat_summary = df.groupby("항목")["금액"].sum().sort_values(ascending=False)
-    top_cat = cat_summary.index[0] if not cat_summary.empty else "-"
-    top_cat_amt = cat_summary.iloc[0] if not cat_summary.empty else 0
-    top_cat_ratio = (top_cat_amt / total_sum * 100) if total_sum > 0 else 0
+    cat_summary = df.groupby("항목")["금액"].sum().to_dict()
+    member_summary = df.groupby("팀원")["금액"].sum().to_dict()
+    month_summary = df.groupby("날짜")["금액"].sum().to_dict()
 
-    # 팀원별 집계
-    member_summary = (
-        df.groupby("팀원")["금액"].sum().sort_values(ascending=False)
-    )
-    top_member = member_summary.index[0] if not member_summary.empty else "-"
-    top_member_amt = member_summary.iloc[0] if not member_summary.empty else 0
-    top_member_ratio = (
-        (top_member_amt / total_sum * 100) if total_sum > 0 else 0
-    )
-
-    # 텍스트 리포트 생성
-    report = f"""
-    ### 📢 예산 집계 및 요약 브리핑
-    ---
-    #### 1. 핵심 지표 요약
-    * **총 집계 지출액**: **`{total_sum:,.0f}원`** (총 {total_count}건 등록)
-    * **1건당 평균 지출액**: `{avg_amount:,.0f}원`
-    
-    #### 2. 주요 분석 인사이트
-    * **최다 지출 항목**: **`{top_cat}`** 
-      * 지출액: `{top_cat_amt:,.0f}원` (전체 지출의 **{top_cat_ratio:.1f}%** 차지)
-    * **최다 지출 팀원**: **`{top_member}`**
-      * 지출액: `{top_member_amt:,.0f}원` (전체 지출의 **{top_member_ratio:.1f}%** 차지)
-    
-    #### 3. 항목별 상세 지출 현황
+    # LLM 전달용 프롬프트 구성
+    data_context = f"""
+    [팀 예산 사용 데이터 현황]
+    - 전체 지출 총액: {total_sum:,.0f}원
+    - 총 지출 건수: {total_count}건
+    - 항목별 지출: {cat_summary}
+    - 팀원별 지출: {member_summary}
+    - 월별 지출: {month_summary}
     """
 
-    for cat, amt in cat_summary.items():
-        ratio = (amt / total_sum * 100) if total_sum > 0 else 0
-        report += f"\n    * **{cat}**: `{amt:,.0f}원` ({ratio:.1f}%)"
+    system_prompt = """
+    당신은 기업의 유능한 재무/예산 분석 전문가입니다. 
+    주어진 예산 데이터를 바탕으로 부장님 및 팀원들이 한눈에 파악할 수 있는 **'AI 예산 분석 브리핑 보고서'**를 작성해 주세요.
 
-    report += "\n\n    #### 4. 팀원별 상세 지출 현황"
-    for mem, amt in member_summary.items():
-        ratio = (amt / total_sum * 100) if total_sum > 0 else 0
-        report += f"\n    * **{mem}**: `{amt:,.0f}원` ({ratio:.1f}%)"
-
-    report += f"""
-    
-    ---
-    💡 **관리자 가이드**: 
-    현재 가장 지출 비중이 높은 항목은 **[{top_cat}]**입니다. 월별 예산 한도 대비 차이가 큰 경우 해당 항목의 상세 영수증 내역 검토를 권장합니다.
+    [작성 요구사항]
+    1. 구성:
+       - 📌 **총평 및 핵심 지표 Summary**
+       - 📊 **항목 및 팀원별 주요 특징 분석** (어디에, 누구에게 지출이 집중되었는지)
+       - 💡 **재무 관리자 제안 및 시사점** (절감 포인트, 이상 지출 감지 여부 등)
+    2. 어조: 전문적이고 정중하며 명확한 보고서 어조 (경어체).
+    3. 가독성을 위해 가두리 강조, 불렛포인트, 마크다운(Markdown) 형식을 적극 활용하세요.
     """
-    return report
+
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": data_context},
+            ],
+            temperature=0.7,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"❌ AI 보고서 생성 중 오류가 발생했습니다: {str(e)}"
 
 
 # 데이터 세션 상태 초기화
 if "budget_data" not in st.session_state:
     st.session_state.budget_data = fetch_data_from_sheet()
 
-if "show_briefing" not in st.session_state:
-    st.session_state.show_briefing = False
+if "ai_report" not in st.session_state:
+    st.session_state.ai_report = None
 
 # UI 타이틀
 st.markdown(
@@ -146,25 +141,24 @@ st.markdown(
 )
 st.markdown("---")
 
-# ==================== [상부 브리핑 버튼 영역] ====================
+# ==================== [상부 AI 브리핑 버튼 영역] ====================
 top_col1, top_col2, top_col3 = st.columns([1, 2, 1])
 with top_col2:
     if st.button(
-        "🤖 AI 예산 집계 및 분석 브리핑 보기",
+        "🤖 AI 자연어 예산 분석 보고서 생성",
         use_container_width=True,
         type="primary",
     ):
-        # 클릭할 때마다 최신 데이터를 가져옴
         st.session_state.budget_data = fetch_data_from_sheet()
-        st.session_state.show_briefing = not st.session_state.show_briefing
+        df_current = pd.DataFrame(st.session_state.budget_data)
 
-# 브리핑 토글 표시 영역
-if st.session_state.show_briefing:
-    df_current = pd.DataFrame(st.session_state.budget_data)
-    briefing_text = generate_budget_report(df_current)
+        with st.spinner("AI가 예산 데이터를 분석하여 보고서를 작성 중입니다..."):
+            st.session_state.ai_report = generate_ai_budget_report(df_current)
 
-    with st.expander("📌 예산 집계 분석 리포트 (클릭하여 접기)", expanded=True):
-        st.info(briefing_text)
+# AI 보고서 출력 영역
+if st.session_state.ai_report:
+    with st.expander("📌 OpenAI 기반 예산 브리핑 보고서 (클릭하여 접기)", expanded=True):
+        st.markdown(st.session_state.ai_report)
 
 st.markdown("---")
 # ===================================================================
@@ -208,6 +202,7 @@ with tab1:
                     if success:
                         st.success("성공적으로 저장되었습니다!")
                         st.session_state.budget_data = fetch_data_from_sheet()
+                        st.session_state.ai_report = None  # 신규 입력 시 기존 AI 보고서 초기화
                         st.rerun()
                     else:
                         st.error(f"저장 실패: {err_msg}")
@@ -221,6 +216,7 @@ with tab1:
         with col_refresh:
             if st.button("🔄 새로고침"):
                 st.session_state.budget_data = fetch_data_from_sheet()
+                st.session_state.ai_report = None
                 st.rerun()
 
         if st.session_state.budget_data:
@@ -243,6 +239,7 @@ with tab1:
                     if delete_data_from_sheet(row_id):
                         st.success("삭제되었습니다.")
                         st.session_state.budget_data = fetch_data_from_sheet()
+                        st.session_state.ai_report = None
                         st.rerun()
                     else:
                         st.error("삭제 실패")
