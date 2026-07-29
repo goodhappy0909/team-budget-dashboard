@@ -11,14 +11,13 @@ st.set_page_config(
     layout="wide",
 )
 
-# [중요] 배포하신 구글 Apps Script 웹 앱 URL을 입력하세요.
+# 🔗 Google Apps Script 웹 앱 URL
 GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzUMMQcmzzYAkmLF-urvol4-tocFISIgtYYQW7whzfSI2SYEcHX0pwx-D2ETAn8Fib-cw/exec"
 
 
 def call_gas_api(params):
-    """파이썬 기본 라이브러리를 사용하여 구글 Apps Script 통신 (리다이렉트 추적 처리)"""
+    """구글 Apps Script 통신 함수"""
     try:
-        # URL 쿼리 파라미터 생성 및 인코딩
         query_string = urllib.parse.urlencode(params)
         full_url = f"{GAS_WEB_APP_URL}?{query_string}"
 
@@ -26,7 +25,6 @@ def call_gas_api(params):
             full_url, headers={"User-Agent": "Mozilla/5.0"}
         )
 
-        # HTTP 요청 실행
         with urllib.request.urlopen(req, timeout=15) as response:
             res_data = response.read().decode("utf-8")
             return json.loads(res_data)
@@ -44,7 +42,6 @@ def fetch_data_from_sheet():
 
 def insert_data_to_sheet(entry):
     """구글 시트에 데이터 추가하기"""
-    # JSON 문자열로 자동 변환하여 전송
     data_json = json.dumps(
         {
             "id": str(entry["id"]),
@@ -72,9 +69,75 @@ def delete_data_from_sheet(row_id):
     return res.get("status") == "success"
 
 
+def generate_budget_report(df):
+    """현재 예산 데이터를 분석하여 브리핑 보고서 생성"""
+    if df.empty:
+        return "등록된 데이터가 없어 예산을 집계할 수 없습니다."
+
+    # 숫자 데이터 정제
+    df["금액"] = pd.to_numeric(df["금액"], errors="coerce").fillna(0)
+
+    total_sum = df["금액"].sum()
+    total_count = len(df)
+    avg_amount = total_sum / total_count if total_count > 0 else 0
+
+    # 항목별 집계
+    cat_summary = df.groupby("항목")["금액"].sum().sort_values(ascending=False)
+    top_cat = cat_summary.index[0] if not cat_summary.empty else "-"
+    top_cat_amt = cat_summary.iloc[0] if not cat_summary.empty else 0
+    top_cat_ratio = (top_cat_amt / total_sum * 100) if total_sum > 0 else 0
+
+    # 팀원별 집계
+    member_summary = (
+        df.groupby("팀원")["금액"].sum().sort_values(ascending=False)
+    )
+    top_member = member_summary.index[0] if not member_summary.empty else "-"
+    top_member_amt = member_summary.iloc[0] if not member_summary.empty else 0
+    top_member_ratio = (
+        (top_member_amt / total_sum * 100) if total_sum > 0 else 0
+    )
+
+    # 텍스트 리포트 생성
+    report = f"""
+    ### 📢 예산 집계 및 요약 브리핑
+    ---
+    #### 1. 핵심 지표 요약
+    * **총 집계 지출액**: **`{total_sum:,.0f}원`** (총 {total_count}건 등록)
+    * **1건당 평균 지출액**: `{avg_amount:,.0f}원`
+    
+    #### 2. 주요 분석 인사이트
+    * **최다 지출 항목**: **`{top_cat}`** 
+      * 지출액: `{top_cat_amt:,.0f}원` (전체 지출의 **{top_cat_ratio:.1f}%** 차지)
+    * **최다 지출 팀원**: **`{top_member}`**
+      * 지출액: `{top_member_amt:,.0f}원` (전체 지출의 **{top_member_ratio:.1f}%** 차지)
+    
+    #### 3. 항목별 상세 지출 현황
+    """
+
+    for cat, amt in cat_summary.items():
+        ratio = (amt / total_sum * 100) if total_sum > 0 else 0
+        report += f"\n    * **{cat}**: `{amt:,.0f}원` ({ratio:.1f}%)"
+
+    report += "\n\n    #### 4. 팀원별 상세 지출 현황"
+    for mem, amt in member_summary.items():
+        ratio = (amt / total_sum * 100) if total_sum > 0 else 0
+        report += f"\n    * **{mem}**: `{amt:,.0f}원` ({ratio:.1f}%)"
+
+    report += f"""
+    
+    ---
+    💡 **관리자 가이드**: 
+    현재 가장 지출 비중이 높은 항목은 **[{top_cat}]**입니다. 월별 예산 한도 대비 차이가 큰 경우 해당 항목의 상세 영수증 내역 검토를 권장합니다.
+    """
+    return report
+
+
 # 데이터 세션 상태 초기화
 if "budget_data" not in st.session_state:
     st.session_state.budget_data = fetch_data_from_sheet()
+
+if "show_briefing" not in st.session_state:
+    st.session_state.show_briefing = False
 
 # UI 타이틀
 st.markdown(
@@ -82,6 +145,29 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown("---")
+
+# ==================== [상부 브리핑 버튼 영역] ====================
+top_col1, top_col2, top_col3 = st.columns([1, 2, 1])
+with top_col2:
+    if st.button(
+        "🤖 AI 예산 집계 및 분석 브리핑 보기",
+        use_container_width=True,
+        type="primary",
+    ):
+        # 클릭할 때마다 최신 데이터를 가져옴
+        st.session_state.budget_data = fetch_data_from_sheet()
+        st.session_state.show_briefing = not st.session_state.show_briefing
+
+# 브리핑 토글 표시 영역
+if st.session_state.show_briefing:
+    df_current = pd.DataFrame(st.session_state.budget_data)
+    briefing_text = generate_budget_report(df_current)
+
+    with st.expander("📌 예산 집계 분석 리포트 (클릭하여 접기)", expanded=True):
+        st.info(briefing_text)
+
+st.markdown("---")
+# ===================================================================
 
 tab1, tab2 = st.tabs(["📝 데이터 입력", "📈 전체 대시보드"])
 
