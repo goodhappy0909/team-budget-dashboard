@@ -9,8 +9,8 @@ st.set_page_config(
     layout="wide",
 )
 
-# ⚠️ 여기에 배포한 Google Apps Script 웹 앱 URL을 입력하세요!
-GAS_WEB_APP_URL = "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE"
+# 구글 Apps Script 웹 앱 URL 반영 완료
+GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzUMMQcmzzYAkmLF-urvol4-tocFISIgtYYQW7whzfSI2SYEcHX0pwx-D2ETAn8Fib-cw/exec"
 
 
 # -------------------------------------------------------------------------
@@ -18,8 +18,6 @@ GAS_WEB_APP_URL = "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE"
 # -------------------------------------------------------------------------
 def fetch_data_from_sheet():
     """구글 시트에서 전체 데이터 조회"""
-    if not GAS_WEB_APP_URL or GAS_WEB_APP_URL == "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE":
-        return []
     try:
         response = requests.get(f"{GAS_WEB_APP_URL}?action=select")
         result = response.json()
@@ -32,12 +30,11 @@ def fetch_data_from_sheet():
 
 def insert_data_to_sheet(entry):
     """구글 시트에 새로운 데이터 추가"""
-    if not GAS_WEB_APP_URL or GAS_WEB_APP_URL == "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE":
-        return False
     try:
         payload = {
             "action": "insert",
             "data": {
+                "id": entry["id"],
                 "날짜": entry["날짜"],
                 "팀원": entry["팀원"],
                 "항목": entry["항목"],
@@ -54,8 +51,6 @@ def insert_data_to_sheet(entry):
 
 def delete_data_from_sheet(row_id):
     """구글 시트에서 특정 데이터 삭제 (id 기준)"""
-    if not GAS_WEB_APP_URL or GAS_WEB_APP_URL == "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE":
-        return False
     try:
         payload = {
             "action": "delete",
@@ -127,13 +122,10 @@ with tab1:
                     # 구글 시트에 저장 시도
                     if insert_data_to_sheet(new_entry):
                         st.success("구글 시트에 정상적으로 기록되었습니다!")
-                        # 데이터 갱신을 위해 최신 데이터 다시 불러오기
                         st.session_state.budget_data = fetch_data_from_sheet()
                         st.rerun()
                     else:
-                        st.error(
-                            "저장에 실패했습니다. URL 설정을 확인해주세요."
-                        )
+                        st.error("저장에 실패했습니다. 관리자에게 문의하세요.")
                 else:
                     st.warning("올바른 월과 금액을 입력해주세요.")
 
@@ -146,23 +138,20 @@ with tab1:
                 st.session_state.budget_data = fetch_data_from_sheet()
                 st.rerun()
 
-        # 데이터가 비어있다면 한 번 더 가져오기 시도
         if not st.session_state.budget_data:
             st.session_state.budget_data = fetch_data_from_sheet()
 
         if st.session_state.budget_data:
             df_history = pd.DataFrame(st.session_state.budget_data)
 
-            # 화면 표시용 데이터프레임 구성 (역순 정렬하여 최신 항목이 위로 오게)
             for idx, row in df_history.iloc[::-1].iterrows():
                 c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 3, 1])
                 c1.write(str(row.get("날짜", "")))
                 c2.write(str(row.get("팀원", "")))
                 c3.markdown(f"**{row.get('항목', '')}**")
                 
-                # 금액 안전 변환
                 try:
-                    amt_val = int(row.get("금액", 0))
+                    amt_val = int(float(row.get("금액", 0)))
                 except:
                     amt_val = 0
                 c4.write(f"{amt_val:,}원")
@@ -176,12 +165,9 @@ with tab1:
                     else:
                         st.error("삭제 실패")
         else:
-            st.info(
-                "등록된 데이터가 없거나 구글 시트 URL 연결을 확인해주세요."
-            )
+            st.info("등록된 데이터가 없습니다.")
 
 with tab2:
-    # 대시보드 탭 진입 시 최신 데이터 동기화
     st.session_state.budget_data = fetch_data_from_sheet()
 
     if not st.session_state.budget_data:
@@ -191,10 +177,8 @@ with tab2:
     else:
         df_all = pd.DataFrame(st.session_state.budget_data)
         
-        # 숫자 타입 보정
-        df_all["금액"] = pd.to_numeric(df_all["금액"], errors="fillna").fillna(0)
+        df_all["금액"] = pd.to_numeric(df_all["금액"], errors="coerce").fillna(0)
 
-        # 상단 지표 카드
         total_sum = df_all["금액"].sum()
         total_count = len(df_all)
 
@@ -212,7 +196,6 @@ with tab2:
 
         st.markdown("---")
 
-        # 차트 영역
         c_chart1, c_chart2 = st.columns(2)
 
         with c_chart1:
@@ -227,7 +210,6 @@ with tab2:
 
         st.markdown("---")
 
-        # 월별/항목별 요약 테이블 (취합본)
         st.subheader("📅 월별/항목별 요약 테이블 (취합본)")
 
         pivot_df = df_all.pivot_table(
