@@ -3,80 +3,171 @@ import streamlit as st
 
 # 페이지 설정
 st.set_page_config(
-    page_title="팀 예산 관리 대시보드", page_icon="💰", layout="wide"
+    page_title="팀 예산 현황 및 취합 시스템", page_icon="📊", layout="wide"
 )
+
+# 세션 상태에 데이터 초기화 (브라우저 로컬스토리지 역할)
+if "budget_data" not in st.session_state:
+    st.session_state.budget_data = []
 
 # 타이틀
-st.title("💰 팀 예산 관리 대시보드")
-st.markdown("팀의 예산 사용 현황을 실시간으로 확인하고 관리하세요.")
-
-# 예시 데이터 생성 (실제 데이터프레임이나 CSV 파일로 대체 가능)
-if "budget_data" not in st.session_state:
-    st.session_state.budget_data = pd.DataFrame(
-    {
-        "항목": ["회식비", "도서구입", "소프트웨어 구독", "간식비", "출장비"],
-        "카테고리": [
-            "복리후생",
-            "자기계발",
-            "도구/인프라",
-            "복리후생",
-            "업무출장",
-        ],
-        "배정예산": [1000000, 500000, 2000000, 300000, 1500000],
-        "사용금액": [750000, 200000, 2000000, 250000, 800000],
-    }
+st.markdown(
+    "<h1 style='text-align: center;'>📊 팀 예산 관리 시스템</h1>",
+    unsafe_allow_html=True,
 )
-
-df = st.session_state.budget_data
-df["잔액"] = df["배정예산"] - df["사용금액"]
-df["사용률(%)"] = (df["사용금액"] / df["배정예산"] * 100).round(1)
-
-# 상단 주요 지표 (Metrics)
-total_budget = df["배정예산"].sum()
-total_used = df["사용금액"].sum()
-total_remain = df["잔액"].sum()
-
-col1, col2, col3 = st.columns(3)
-col1.metric("총 배정 예산", f"{total_budget:,.0f} 원")
-col2.metric("총 사용 금액", f"{total_used:,.0f} 원")
-col3.metric("남은 예산", f"{total_remain:,.0f} 원")
-
+st.markdown(
+    "<p style='text-align: center; color: gray;'>부장님 보고용 월별 예산 취합 및 대시보드</p>",
+    unsafe_allow_html=True,
+)
 st.markdown("---")
 
-# 예산 항목별 현황 테이블
-st.subheader("📊 항목별 예산 상세 현황")
-st.dataframe(df, use_container_width=True)
+# 탭 메뉴 구현
+tab1, tab2 = st.tabs(["📝 데이터 입력", "📈 전체 대시보드"])
 
-# 지출 내역 추가 섹션
-st.markdown("---")
-st.subheader("➕ 새로운 지출 내역 추가")
+with tab1:
+    col1, col2 = st.columns([1, 2], gap="large")
 
-with st.form("expense_form"):
-    col_a, col_b = st.columns(2)
-    with col_a:
-        item_name = st.text_input("항목 이름")
-        item_category = st.selectbox(
-            "카테고리", ["복리후생", "자기계발", "도구/인프라", "업무출장", "기타"]
-        )
-    with col_b:
-        allocated = st.number_input("배정 예산 (원)", min_value=0, step=10000)
-        used = st.number_input("사용 금액 (원)", min_value=0, step=10000)
-
-    submitted = st.form_submit_button("추가하기")
-    if submitted:
-        if item_name:
-            new_row = pd.DataFrame(
-                {
-                    "항목": [item_name],
-                    "카테고리": [item_category],
-                    "배정예산": [allocated],
-                    "사용금액": [used],
-                }
+    with col1:
+        st.subheader("내역 입력")
+        with st.form("budget_form", clear_on_submit=True):
+            member = st.selectbox(
+                "팀원 선택", ["부장님", "팀원1", "팀원2", "팀원3", "팀원4"]
             )
-            st.session_name = pd.concat(
-                [st.session_state.budget_data, new_row], ignore_index=True
+            # 기본값으로 현재 년월 설정
+            current_month = pd.Timestamp.now().strftime("%Y-%m")
+            month = st.text_input(
+                "해당 월 (YYYY-MM)",
+                value=current_month,
+                placeholder="2026-06",
             )
-            st.success(f"'{item_name}' 항목이 추가되었습니다!")
-            st.rerun()
+            category = st.selectbox(
+                "예산 항목", ["수선유지비", "비품", "개량공사"]
+            )
+            amount = st.number_input(
+                "사용 금액 (원)", min_value=0, step=1000, format="%d"
+            )
+
+            submitted = st.form_submit_button(
+                "기록 저장하기", use_container_width=True
+            )
+            if submitted:
+                if month and amount > 0:
+                    new_entry = {
+                        "id": pd.Timestamp.now().timestamp(),
+                        "날짜": month,
+                        "팀원": member,
+                        "항목": category,
+                        "금액": amount,
+                    }
+                    # 최신순으로 위에 추가
+                    st.session_state.budget_data.insert(0, new_entry)
+                    st.success("예산 데이터가 정상적으로 기록되었습니다.")
+                    st.rerun()
+                else:
+                    st.warning("올바른 월과 금액을 입력해주세요.")
+
+    with col2:
+        col_title, col_del = st.columns([4, 1])
+        with col_title:
+            st.subheader("📂 최근 입력 내역")
+        with col_del:
+            if st.button("모든 데이터 초기화", type="secondary"):
+                st.session_state.budget_data = []
+                st.success("초기화되었습니다.")
+                st.rerun()
+
+        if st.session_state.budget_data:
+            df_history = pd.DataFrame(st.session_state.budget_data)
+
+            # 화면 표시용 데이터프레임 구성
+            for idx, row in df_history.iterrows():
+                c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 3, 1])
+                c1.write(row["날짜"])
+                c2.write(row["팀원"])
+                c3.markdown(f"**{row['항목']}**")
+                c4.write(f"{row['금액']:,}원")
+                if c5.button("🗑️", key=f"del_{row['id']}setItem"):
+                    st.session_state.budget_data = [
+                        item
+                        for item in st.session_state.budget_data
+                        if item["id"] != row["id"]
+                    ]
+                    st.rerun()
         else:
-            st.warning("항목 이름을 입력해주세요.")
+            st.info("등록된 데이터가 없습니다.")
+
+with tab2:
+    if not st.session_state.budget_data:
+        st.warning(
+            "표시할 데이터가 없습니다. '데이터 입력' 탭에서 내역을 먼저 추가해주세요."
+        )
+    else:
+        df_all = pd.DataFrame(st.session_state.budget_data)
+
+        # 상단 지표 카드
+        total_sum = df_all["금액"].sum()
+        total_count = len(df_all)
+
+        # 이번 달 최대 사용 항목 계산
+        cat_grouped = df_all.groupby("항목")["금액"].sum()
+        top_cat = (
+            cat_grouped.idxmax()
+            if not cat_grouped.empty
+            else "-"
+        )
+        top_cat_val = cat_grouped.max() if not cat_grouped.empty else 0
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("전체 누적 사용액", f"{total_sum:,.0f}원")
+        m2.metric(
+            "가장 많이 쓴 항목",
+            f"{top_cat} ({top_cat_val:,.0f}원)"
+            if top_cat != "-"
+            else "-",
+        )
+        m3.metric("데이터 건수", f"{total_count}건")
+
+        st.markdown("---")
+
+        # 차트 영역
+        c_chart1, c_chart2 = st.columns(2)
+
+        with c_chart1:
+            st.subheader("🏠 항목별 예산 분포")
+            cat_df = df_all.groupby("항목")["금액"].sum().reset_index()
+            # Streamlit bar chart 또는 native chart 활용
+            st.bar_chart(cat_df.set_index("항목"))
+
+        with c_chart2:
+            st.subheader("👥 팀원별 누적 사용액")
+            mem_df = df_all.groupby("팀원")["금액"].sum().reset_index()
+            st.bar_chart(mem_df.set_index("팀원"))
+
+        st.markdown("---")
+
+        # 월별/항목별 요약 테이블 (취합본)
+        st.subheader("📅 월별/항목별 요약 테이블 (취합본)")
+
+        # 피벗 테이블 생성 (연월 x 항목)
+        pivot_df = df_all.pivot_table(
+            index="날짜",
+            columns="항목",
+            values="금액",
+            aggfunc="sum",
+            fill_value=0,
+        )
+
+        # 기본 카테고리(수선유지비, 비품, 개량공사)가 빠져있을 경우 0으로 채워주기
+        for required_cat in ["수선유지비", "비품", "개량공사"]:
+            if required_cat not in pivot_df.columns:
+                pivot_df[required_cat] = 0
+
+        # 필요한 컬럼 순서 정렬 및 합계 계산
+        pivot_df = pivot_df[["수선유지비", "비품", "개량공사"]]
+        pivot_df["합계"] = pivot_df.sum(axis=1)
+
+        # 날짜 기준 내림차순 정렬
+        pivot_df = pivot_df.sort_index(ascending=False)
+
+        # 포맷팅 적용을 위한 복사본 혹은 그대로 출력
+        st.dataframe(pivot_df.applymap(lambda x: f"{x:,.0f}원"), use_container_width=True)
