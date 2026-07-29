@@ -9,22 +9,18 @@ st.set_page_config(
     layout="wide",
 )
 
-# 구글 Apps Script 웹 앱 URL 반영 완료
 GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzUMMQcmzzYAkmLF-urvol4-tocFISIgtYYQW7whzfSI2SYEcHX0pwx-D2ETAn8Fib-cw/exec"
 
 
-# -------------------------------------------------------------------------
-# 구글 시트 DB 연동 함수들
-# -------------------------------------------------------------------------
 def fetch_data_from_sheet():
     """구글 시트에서 전체 데이터 조회"""
     try:
-        response = requests.get(f"{GAS_WEB_APP_URL}?action=select")
+        response = requests.get(f"{GAS_WEB_APP_URL}?action=select", timeout=10)
         result = response.json()
         if result.get("status") == "success":
             return result.get("data", [])
     except Exception as e:
-        st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
+        st.error(f"데이터 조회 중 통신 오류 발생: {e}")
     return []
 
 
@@ -34,19 +30,22 @@ def insert_data_to_sheet(entry):
         payload = {
             "action": "insert",
             "data": {
-                "id": entry["id"],
-                "날짜": entry["날짜"],
-                "팀원": entry["팀원"],
-                "항목": entry["항목"],
-                "금액": entry["금액"],
+                "id": str(entry["id"]),
+                "날짜": str(entry["날짜"]),
+                "팀원": str(entry["팀원"]),
+                "항목": str(entry["항목"]),
+                "금액": int(entry["금액"]),
             },
         }
-        response = requests.post(GAS_WEB_APP_URL, json=payload)
+        response = requests.post(GAS_WEB_APP_URL, json=payload, timeout=10)
         result = response.json()
-        return result.get("status") == "success"
+        
+        if result.get("status") == "success":
+            return True, ""
+        else:
+            return False, result.get("message", "알 수 없는 서버 에러")
     except Exception as e:
-        st.error(f"데이터 저장 중 오류가 발생했습니다: {e}")
-        return False
+        return False, str(e)
 
 
 def delete_data_from_sheet(row_id):
@@ -55,19 +54,17 @@ def delete_data_from_sheet(row_id):
         payload = {
             "action": "delete",
             "idColumn": "id",
-            "idValue": row_id,
+            "idValue": str(row_id),
         }
-        response = requests.post(GAS_WEB_APP_URL, json=payload)
+        response = requests.post(GAS_WEB_APP_URL, json=payload, timeout=10)
         result = response.json()
         return result.get("status") == "success"
     except Exception as e:
-        st.error(f"데이터 삭제 중 오류가 발생했습니다: {e}")
+        st.error(f"데이터 삭제 중 오류 발생: {e}")
         return False
 
 
-# -------------------------------------------------------------------------
-# 세션 상태 초기화 및 데이터 동기화
-# -------------------------------------------------------------------------
+# 세션 상태 초기화
 if "budget_data" not in st.session_state:
     st.session_state.budget_data = fetch_data_from_sheet()
 
@@ -82,7 +79,6 @@ st.markdown(
 )
 st.markdown("---")
 
-# 탭 메뉴 구현
 tab1, tab2 = st.tabs(["📝 데이터 입력", "📈 전체 대시보드"])
 
 with tab1:
@@ -113,19 +109,20 @@ with tab1:
             if submitted:
                 if month and amount > 0:
                     new_entry = {
-                        "id": int(pd.Timestamp.now().timestamp() * 1000),  # 고유 ID 생성
+                        "id": int(pd.Timestamp.now().timestamp() * 1000),
                         "날짜": month,
                         "팀원": member,
                         "항목": category,
                         "금액": amount,
                     }
-                    # 구글 시트에 저장 시도
-                    if insert_data_to_sheet(new_entry):
+                    
+                    success, err_msg = insert_data_to_sheet(new_entry)
+                    if success:
                         st.success("구글 시트에 정상적으로 기록되었습니다!")
                         st.session_state.budget_data = fetch_data_from_sheet()
                         st.rerun()
                     else:
-                        st.error("저장에 실패했습니다. 관리자에게 문의하세요.")
+                        st.error(f"저장에 실패했습니다. (상세 사유: {err_msg})")
                 else:
                     st.warning("올바른 월과 금액을 입력해주세요.")
 
@@ -176,7 +173,6 @@ with tab2:
         )
     else:
         df_all = pd.DataFrame(st.session_state.budget_data)
-        
         df_all["금액"] = pd.to_numeric(df_all["금액"], errors="coerce").fillna(0)
 
         total_sum = df_all["금액"].sum()
