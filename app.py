@@ -1,9 +1,9 @@
 import json
 import urllib.parse
 import urllib.request
+from google import genai
 import pandas as pd
 import streamlit as st
-from openai import OpenAI
 
 # 페이지 기본 설정
 st.set_page_config(
@@ -71,14 +71,14 @@ def delete_data_from_sheet(row_id):
 
 
 def generate_ai_budget_report(df):
-    """OpenAI API를 연동하여 자연어 예산 분석 보고서 생성"""
+    """Google Gemini API(gemini-2.5-flash)를 연동하여 자연어 예산 분석 보고서 생성"""
     if df.empty:
         return "등록된 데이터가 없어 예산을 분석할 수 없습니다."
 
     # Secrets에서 API 키 가져오기
-    api_key = st.secrets.get("OPENAI_API_KEY")
+    api_key = st.secrets.get("GEMINI_API_KEY")
     if not api_key:
-        return "⚠️ OpenAI API 키가 설정되지 않았습니다. Streamlit Secrets에 `OPENAI_API_KEY`를 등록해 주세요."
+        return "⚠️ Gemini API 키가 설정되지 않았습니다. Streamlit Secrets에 `GEMINI_API_KEY`를 등록해 주세요."
 
     # 데이터 정제 및 기본 요약
     df["금액"] = pd.to_numeric(df["금액"], errors="coerce").fillna(0)
@@ -89,19 +89,17 @@ def generate_ai_budget_report(df):
     member_summary = df.groupby("팀원")["금액"].sum().to_dict()
     month_summary = df.groupby("날짜")["금액"].sum().to_dict()
 
-    # LLM 전달용 프롬프트 구성
-    data_context = f"""
+    # 프롬프트 구성
+    prompt = f"""
+    당신은 기업의 유능한 재무/예산 분석 전문가입니다.
+    주어진 예산 데이터를 바탕으로 부장님 및 팀원들이 한눈에 파악할 수 있는 **'AI 예산 분석 브리핑 보고서'**를 작성해 주세요.
+
     [팀 예산 사용 데이터 현황]
     - 전체 지출 총액: {total_sum:,.0f}원
     - 총 지출 건수: {total_count}건
     - 항목별 지출: {cat_summary}
     - 팀원별 지출: {member_summary}
     - 월별 지출: {month_summary}
-    """
-
-    system_prompt = """
-    당신은 기업의 유능한 재무/예산 분석 전문가입니다. 
-    주어진 예산 데이터를 바탕으로 부장님 및 팀원들이 한눈에 파악할 수 있는 **'AI 예산 분석 브리핑 보고서'**를 작성해 주세요.
 
     [작성 요구사항]
     1. 구성:
@@ -113,18 +111,15 @@ def generate_ai_budget_report(df):
     """
 
     try:
-        client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": data_context},
-            ],
-            temperature=0.7,
+        # 최신 google-genai SDK 호출 (Gemini 2.5 Flash 모델)
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
         )
-        return response.choices[0].message.content
+        return response.text
     except Exception as e:
-        return f"❌ AI 보고서 생성 중 오류가 발생했습니다: {str(e)}"
+        return f"❌ Gemini AI 보고서 생성 중 오류가 발생했습니다: {str(e)}"
 
 
 # 데이터 세션 상태 초기화
@@ -145,19 +140,19 @@ st.markdown("---")
 top_col1, top_col2, top_col3 = st.columns([1, 2, 1])
 with top_col2:
     if st.button(
-        "🤖 AI 자연어 예산 분석 보고서 생성",
+        "🤖 Gemini AI 자연어 예산 분석 보고서 생성",
         use_container_width=True,
         type="primary",
     ):
         st.session_state.budget_data = fetch_data_from_sheet()
         df_current = pd.DataFrame(st.session_state.budget_data)
 
-        with st.spinner("AI가 예산 데이터를 분석하여 보고서를 작성 중입니다..."):
+        with st.spinner("Gemini AI가 예산 데이터를 분석하여 보고서를 작성 중입니다..."):
             st.session_state.ai_report = generate_ai_budget_report(df_current)
 
 # AI 보고서 출력 영역
 if st.session_state.ai_report:
-    with st.expander("📌 OpenAI 기반 예산 브리핑 보고서 (클릭하여 접기)", expanded=True):
+    with st.expander("📌 Gemini 기반 예산 브리핑 보고서 (클릭하여 접기)", expanded=True):
         st.markdown(st.session_state.ai_report)
 
 st.markdown("---")
