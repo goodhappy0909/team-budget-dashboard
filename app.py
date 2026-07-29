@@ -71,7 +71,7 @@ def delete_data_from_sheet(row_id):
 
 
 def generate_ai_budget_report(df):
-    """Google Gemini API(gemini-2.5-flash)를 연동하여 자연어 예산 분석 보고서 생성"""
+    """Google Gemini API(gemini-3-flash-preview)를 연동하여 자연어 예산 분석 보고서 생성"""
     if df.empty:
         return "등록된 데이터가 없어 예산을 분석할 수 없습니다."
 
@@ -111,10 +111,9 @@ def generate_ai_budget_report(df):
     """
 
     try:
-        # 최신 google-genai SDK 호출 (Gemini 2.5 Flash 모델)
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3-flash-preview",  # 👈 gemini-3-flash-preview 모델로 지정
             contents=prompt,
         )
         return response.text
@@ -147,12 +146,16 @@ with top_col2:
         st.session_state.budget_data = fetch_data_from_sheet()
         df_current = pd.DataFrame(st.session_state.budget_data)
 
-        with st.spinner("Gemini AI가 예산 데이터를 분석하여 보고서를 작성 중입니다..."):
+        with st.spinner(
+            "Gemini AI가 예산 데이터를 분석하여 보고서를 작성 중입니다..."
+        ):
             st.session_state.ai_report = generate_ai_budget_report(df_current)
 
 # AI 보고서 출력 영역
 if st.session_state.ai_report:
-    with st.expander("📌 Gemini 기반 예산 브리핑 보고서 (클릭하여 접기)", expanded=True):
+    with st.expander(
+        "📌 Gemini 기반 예산 브리핑 보고서 (클릭하여 접기)", expanded=True
+    ):
         st.markdown(st.session_state.ai_report)
 
 st.markdown("---")
@@ -197,7 +200,9 @@ with tab1:
                     if success:
                         st.success("성공적으로 저장되었습니다!")
                         st.session_state.budget_data = fetch_data_from_sheet()
-                        st.session_state.ai_report = None  # 신규 입력 시 기존 AI 보고서 초기화
+                        st.session_state.ai_report = (
+                            None  # 신규 입력 시 기존 AI 보고서 초기화
+                        )
                         st.rerun()
                     else:
                         st.error(f"저장 실패: {err_msg}")
